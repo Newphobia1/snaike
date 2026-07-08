@@ -901,7 +901,7 @@ let bgAnim      = null;
 let renderer    = null;
 let localGame   = null;
 let onlineClient = null;
-let selSpeed    = 55;
+let selSpeed    = 95;
 
 function startCountdown(speed) {
   localGame.start(speed);
