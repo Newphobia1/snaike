@@ -3,7 +3,6 @@
    Online-Modus: OnlineClient (Server führt Logik aus, Client rendert)
 ──────────────────────────────────────────────────────────── */
 
-// ── WebSocket-URL (nach Deploy anpassen) ─────────────────────
 const WS_URL = (() => {
   const h = window.location.hostname;
   if (h === 'localhost' || h === '127.0.0.1') return 'ws://localhost:3001';
@@ -16,6 +15,14 @@ const W = COLS * CELL, H = ROWS * CELL;
 const wrap = (v, max) => ((v % max) + max) % max;
 const key  = (x, y)  => `${x},${y}`;
 const dirs = [{ x:1,y:0 },{ x:-1,y:0 },{ x:0,y:1 },{ x:0,y:-1 }];
+
+// Spieler-Farben: [head, tail]
+const PLAYER_COLORS = [
+  ['#39ff14', '#1a7a00'],
+  ['#00d4ff', '#006080'],
+  ['#ff9500', '#7a3d00'],
+  ['#ff2d9b', '#7a0045'],
+];
 
 // ── BG ANIMATION ─────────────────────────────────────────────
 class BgAnimation {
@@ -177,9 +184,7 @@ class SnakeAI {
       const pSpace = this.floodFill(pHead, sim, freeTail);
       const distP  = this.dist({x:m.nx,y:m.ny}, pHead);
       const distF  = this.dist({x:m.nx,y:m.ny}, food);
-      const interceptBonus = level >= 4 ? (20-distP)*3 : 0;
-      const foodBonus      = level <= 3 ? (20-distF)*2 : (20-distF);
-      const score = m.space - aggression*pSpace + interceptBonus + foodBonus;
+      const score = m.space - aggression*pSpace + (level>=4?(20-distP)*3:0) + (level<=3?(20-distF)*2:(20-distF));
       if (score > bestScore) { bestScore=score; best=m.d; }
     }
 
@@ -199,7 +204,7 @@ class SnakeAI {
   }
 }
 
-// ── RENDERER (geteilt von Lokal + Online) ────────────────────
+// ── RENDERER ─────────────────────────────────────────────────
 class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -207,11 +212,13 @@ class Renderer {
     this.canvas.width  = W;
     this.canvas.height = H;
     this.particles = [];
+    this.myId      = null; // gesetzt vom OnlineClient
   }
 
+  // state kann zwei Formate haben:
+  // Lokal:  { p1:{body,alive}, ai:{body}, food, obstacles }
+  // Online: { players:[{id,name,body,score,alive}], ai:{body}, food, obstacles, aiLevel }
   draw(state) {
-    // state: { p1, p2, ai, food, obstacles, myId? }
-    // p1/p2/ai: { body: [{x,y},...], alive, score }
     const ctx = this.ctx;
     ctx.clearRect(0, 0, W, H);
 
@@ -238,27 +245,107 @@ class Renderer {
     // Essen
     if (state.food) this.drawFood(state.food);
 
-    // KI-Schlange (rot, im Hintergrund)
+    // KI-Schlange
     if (state.ai?.body?.length) this.drawSnake(state.ai.body, '#ff3a3a', '#7a0000');
 
-    // Spieler 2 (online: cyan, lokal: nicht vorhanden)
-    if (state.p2?.body?.length) {
-      const alpha = state.p2.alive ? 1 : 0.35;
-      ctx.globalAlpha = alpha;
-      this.drawSnake(state.p2.body, '#00d4ff', '#006080');
-      ctx.globalAlpha = 1;
+    // Online-Modus: dynamische Spieler
+    if (state.players) {
+      for (const p of [...state.players].reverse()) {
+        if (!p.body?.length) continue;
+        const [head, tail] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
+        ctx.globalAlpha = p.alive ? 1 : 0.35;
+        this.drawSnake(p.body, head, tail);
+        ctx.globalAlpha = 1;
+        // "Du"-Indikator über eigenem Kopf
+        if (p.id === this.myId && p.alive && p.body.length) {
+          this.drawYouIndicator(p.body[0], head);
+        }
+      }
+      // Legende
+      this.drawLegend(state.players, state.aiLevel ?? 1);
+    }
+    // Lokal-Modus
+    else {
+      if (state.p2?.body?.length) {
+        ctx.globalAlpha = state.p2.alive ? 1 : 0.35;
+        this.drawSnake(state.p2.body, '#00d4ff', '#006080');
+        ctx.globalAlpha = 1;
+      }
+      if (state.p1?.body?.length) {
+        ctx.globalAlpha = state.p1.alive ? 1 : 0.35;
+        this.drawSnake(state.p1.body, '#39ff14', '#1a7a00');
+        ctx.globalAlpha = 1;
+      }
     }
 
-    // Spieler 1 / Du (grün, im Vordergrund)
-    if (state.p1?.body?.length) {
-      const alpha = state.p1.alive ? 1 : 0.35;
-      ctx.globalAlpha = alpha;
-      this.drawSnake(state.p1.body, '#39ff14', '#1a7a00');
-      ctx.globalAlpha = 1;
-    }
-
-    // Partikel
     this.drawParticles();
+  }
+
+  drawYouIndicator(head, color) {
+    const ctx = this.ctx;
+    const cx  = head.x * CELL + CELL / 2;
+    const cy  = head.y * CELL - 3;
+    const pulse = 0.7 + 0.3 * Math.sin(performance.now() / 300);
+
+    // Dreieck (▼)
+    ctx.globalAlpha = pulse;
+    ctx.fillStyle   = color;
+    ctx.beginPath();
+    ctx.moveTo(cx,      cy - 1);
+    ctx.lineTo(cx - 5,  cy - 9);
+    ctx.lineTo(cx + 5,  cy - 9);
+    ctx.closePath();
+    ctx.fill();
+
+    // "DU" Label
+    ctx.globalAlpha = pulse * 0.9;
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = color;
+    ctx.fillText('DU', cx, cy - 11);
+    ctx.globalAlpha = 1;
+    ctx.textAlign = 'left';
+  }
+
+  drawLegend(players, aiLevel) {
+    const ctx   = this.ctx;
+    const items = [
+      ...players.map(p => ({
+        color: PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length][0],
+        label: (p.name || `P${p.id}`) + (p.id === this.myId ? ' ◀' : ''),
+        alive: p.alive,
+      })),
+      { color: '#ff3a3a', label: `KI (Stufe ${aiLevel})`, alive: true },
+    ];
+
+    const padX = 8, padY = 6;
+    const lineH = 16;
+    const boxW  = 110, boxH = items.length * lineH + padY * 2;
+    const bx    = W - boxW - 6, by = H - boxH - 6;
+
+    ctx.fillStyle = 'rgba(5,5,18,0.72)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, boxW, boxH, 7);
+    ctx.fill();
+
+    for (let i = 0; i < items.length; i++) {
+      const it  = items[i];
+      const iy  = by + padY + i * lineH;
+      ctx.globalAlpha = it.alive ? 1 : 0.38;
+
+      // Farb-Punkt
+      ctx.fillStyle = it.color;
+      ctx.beginPath();
+      ctx.arc(bx + padX + 4, iy + 7, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Name
+      ctx.fillStyle = '#d0d0f0';
+      ctx.font = '10px sans-serif';
+      ctx.fillText(it.label, bx + padX + 13, iy + 11);
+
+      ctx.globalAlpha = 1;
+    }
   }
 
   drawFood(food) {
@@ -376,6 +463,7 @@ class SnakeGame {
     this.playerScore = 0; this.aiScore=0; this.aiLevel=1; this.maxAiLevel=1;
     this.elapsed=0; this.paused=false;
     this.renderer.particles = [];
+    this.renderer.myId = null;
     this.placeFood();
     this.updateHUD();
   }
@@ -445,17 +533,7 @@ class SnakeGame {
   }
 
   updateHUD() {
-    document.getElementById('player-score').textContent = this.playerScore;
-    document.getElementById('p2-score').textContent     = this.aiScore;
-    const maxLen = Math.max(this.playerSnake.length, this.aiSnake.length, 3);
-    document.getElementById('player-bar').style.width = `${(this.playerSnake.length/maxLen)*100}%`;
-    document.getElementById('p2-bar').style.width     = `${(this.aiSnake.length/maxLen)*100}%`;
-    const badge = document.getElementById('ai-level-badge');
-    const labels = ['','Stufe 1 – Anfänger','Stufe 2 – Lernend','Stufe 3 – Gefährlich','Stufe 4 – Aggressiv','Stufe 5 – TÖDLICH'];
-    badge.textContent = labels[this.aiLevel]||`Stufe ${this.aiLevel}`;
-    badge.classList.toggle('danger', this.aiLevel>=4);
-    const secs=Math.floor(this.elapsed/1000), mins=Math.floor(secs/60);
-    document.getElementById('timer').textContent = `${mins}:${String(secs%60).padStart(2,'0')}`;
+    buildLocalHUD(this.playerScore, this.aiScore, this.aiLevel, this.elapsed);
   }
 
   togglePause() {
@@ -493,16 +571,18 @@ class SnakeGame {
     const trophy = pDead&&aDead?'🤝':pDead?'🤖':'🏆';
     const title  = pDead&&aDead?'Unentschieden!':pDead?'KI gewinnt!':'Du gewinnst!';
     const sub    = pDead&&aDead?'Gleichzeitig kollidiert.':pDead?'Die KI hatte dich im Griff.':'Stark! Die KI hatte keine Chance.';
-    document.getElementById('end-trophy').textContent    = trophy;
-    document.getElementById('end-title').textContent     = title;
-    document.getElementById('end-subtitle').textContent  = sub;
-    document.getElementById('stat-player-score').textContent = this.playerScore;
-    document.getElementById('stat-ai-score').textContent     = this.aiScore;
-    document.getElementById('stat-time').textContent         = `${mins}:${String(secs%60).padStart(2,'0')}`;
-    document.getElementById('stat-ai-level').textContent     = this.maxAiLevel;
-    document.getElementById('stat-p1-lbl').textContent       = 'Deine Punkte';
-    document.getElementById('stat-p2-lbl').textContent       = 'KI Punkte';
-    document.getElementById('stat-p2-block').style.display   = '';
+
+    document.getElementById('end-trophy').textContent   = trophy;
+    document.getElementById('end-title').textContent    = title;
+    document.getElementById('end-subtitle').textContent = sub;
+
+    const statsEl = document.getElementById('end-stats');
+    statsEl.innerHTML = `
+      <div class="stat-block"><div class="stat-val" style="color:#39ff14">${this.playerScore}</div><div class="stat-lbl">Deine Punkte</div></div>
+      <div class="stat-block"><div class="stat-val" style="color:#ff3a3a">${this.aiScore}</div><div class="stat-lbl">KI Punkte</div></div>
+      <div class="stat-block"><div class="stat-val">${mins}:${String(secs%60).padStart(2,'0')}</div><div class="stat-lbl">Spielzeit</div></div>
+      <div class="stat-block"><div class="stat-val">${this.maxAiLevel}</div><div class="stat-lbl">Max KI-Stufe</div></div>
+    `;
     document.getElementById('rematch-status').classList.add('hidden');
     document.getElementById('play-again-btn').onclick = () => startCountdown(this.speed);
     setTimeout(() => showScreen('end'), 600);
@@ -516,19 +596,16 @@ class OnlineClient {
     this.ws        = null;
     this.myId      = null;
     this.roomCode  = null;
-    this.lastState = null;
+    this.isCreator = false;
     this.speed     = 90;
-    this.foodAnim  = null;
   }
 
   connect(onOpen) {
     this.ws = new WebSocket(WS_URL);
-    this.ws.onopen  = onOpen;
+    this.ws.onopen    = onOpen;
     this.ws.onmessage = e => this.handleMessage(JSON.parse(e.data));
-    this.ws.onerror = () => showError('Verbindung fehlgeschlagen. Ist der Server gestartet?');
-    this.ws.onclose = () => {
-      if (this.myId) showError('Verbindung getrennt.');
-    };
+    this.ws.onerror   = () => showError('Verbindung fehlgeschlagen. Ist der Server gestartet?');
+    this.ws.onclose   = () => { if (this.myId) showError('Verbindung getrennt.'); };
   }
 
   send(obj) {
@@ -539,35 +616,43 @@ class OnlineClient {
     switch (msg.type) {
 
       case 'created':
-        this.myId     = 1;
-        this.roomCode = msg.code;
+        this.myId      = 1;
+        this.isCreator = true;
+        this.roomCode  = msg.code;
+        this.renderer.myId = 1;
         document.getElementById('display-code').textContent = msg.code;
         showScreen('waiting');
         break;
 
-      case 'opponentJoined':
-        document.querySelector('.waiting-title').textContent = 'Mitspieler verbunden! Starte…';
+      case 'joined':
+        this.myId      = msg.playerId;
+        this.isCreator = false;
+        this.renderer.myId = msg.playerId;
+        document.getElementById('display-code').textContent = this.roomCode || '????';
+        showScreen('waiting');
+        this.updateLobbyMsg(false, false);
         break;
 
-      case 'joined':
-        this.myId = 2;
-        showScreen('game');
-        this.setupGameHUD(true);
+      case 'lobby': {
+        this.updateLobbyPlayers(msg.players, msg.canStart);
         break;
+      }
 
       case 'countdown': {
         showScreen('game');
-        this.setupGameHUD(true);
         const el = document.getElementById('countdown');
-        el.classList.remove('hidden');
-        el.textContent = msg.count;
-        el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
-        if (msg.count === 0) el.classList.add('hidden');
+        if (msg.count > 0) {
+          el.classList.remove('hidden');
+          el.textContent = msg.count;
+          el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
+        } else {
+          // count === 0 → Countdown fertig, ausblenden
+          el.classList.add('hidden');
+        }
         break;
       }
 
       case 'state':
-        this.lastState = msg;
         this.renderState(msg);
         this.updateOnlineHUD(msg);
         break;
@@ -577,12 +662,12 @@ class OnlineClient {
         break;
 
       case 'opponentLeft':
-        showError('Dein Mitspieler hat das Spiel verlassen.');
-        this.disconnect();
+        showError(`${msg.name || 'Ein Spieler'} hat das Spiel verlassen.`);
+        this.myId = null;
         break;
 
       case 'rematchRequested':
-        document.getElementById('rematch-status').textContent = 'Mitspieler möchte nochmal spielen…';
+        document.getElementById('rematch-status').textContent = `${msg.name} möchte nochmal spielen…`;
         document.getElementById('rematch-status').classList.remove('hidden');
         break;
 
@@ -597,84 +682,94 @@ class OnlineClient {
     }
   }
 
+  updateLobbyPlayers(players, canStart) {
+    const container = document.getElementById('lobby-players');
+    container.innerHTML = '';
+    for (const p of players) {
+      const [color] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
+      const div = document.createElement('div');
+      div.className = 'lobby-player';
+      div.innerHTML = `
+        <div class="lobby-player-dot" style="background:${color}"></div>
+        <span class="lobby-player-name">${escHtml(p.name)}${p.id===this.myId?' <em style="color:var(--text-dim);font-style:normal;">(Du)</em>':''}</span>
+        ${p.isCreator ? '<span class="lobby-player-badge">Host</span>' : ''}
+      `;
+      container.appendChild(div);
+    }
+    this.updateLobbyMsg(this.isCreator, canStart);
+  }
+
+  updateLobbyMsg(isCreator, canStart) {
+    const startBtn  = document.getElementById('lobby-start-btn');
+    const msgEl     = document.getElementById('lobby-msg');
+    const dotsEl    = document.querySelector('#waiting-screen .waiting-dots');
+
+    if (isCreator) {
+      if (canStart) {
+        startBtn.classList.remove('hidden');
+        msgEl.textContent = 'Bereit! Weitere Spieler können noch beitreten (max. 4).';
+        dotsEl.classList.add('hidden');
+      } else {
+        startBtn.classList.add('hidden');
+        msgEl.textContent = 'Warte auf mindestens einen weiteren Spieler…';
+        dotsEl.classList.remove('hidden');
+      }
+    } else {
+      startBtn.classList.add('hidden');
+      msgEl.textContent = 'Warte darauf, dass der Host das Spiel startet…';
+      dotsEl.classList.remove('hidden');
+    }
+  }
+
   renderState(state) {
-    // Vom Server kommt state.p1 und state.p2 — "ich" bin myId
     this.renderer.draw(state);
-    // Dead overlay für eigene Schlange
-    const me = this.myId === 1 ? state.p1 : state.p2;
+    const me = state.players?.find(p => p.id === this.myId);
     const dead = document.getElementById('dead-overlay');
-    if (me && !me.alive) { dead.classList.remove('hidden'); }
-    else                 { dead.classList.add('hidden'); }
+    if (me && !me.alive) dead.classList.remove('hidden');
+    else                 dead.classList.add('hidden');
   }
 
   updateOnlineHUD(state) {
-    const p1 = state.p1, p2 = state.p2;
-    document.getElementById('player-score').textContent = p1?.score ?? 0;
-    document.getElementById('p2-score').textContent     = p2?.score ?? 0;
-    const maxLen = Math.max(p1?.body?.length??3, p2?.body?.length??3, 3);
-    document.getElementById('player-bar').style.width = `${((p1?.body?.length??3)/maxLen)*100}%`;
-    document.getElementById('p2-bar').style.width     = `${((p2?.body?.length??3)/maxLen)*100}%`;
-    const badge = document.getElementById('ai-level-badge');
-    const labels = ['','Stufe 1','Stufe 2','Stufe 3 – Gefährlich','Stufe 4 – Aggressiv','Stufe 5 – TÖDLICH'];
-    badge.textContent = labels[state.aiLevel]||`Stufe ${state.aiLevel}`;
-    badge.classList.toggle('danger', state.aiLevel>=4);
-    const secs=Math.floor((state.elapsed||0)/1000), mins=Math.floor(secs/60);
-    document.getElementById('timer').textContent = `${mins}:${String(secs%60).padStart(2,'0')}`;
-  }
-
-  setupGameHUD(isOnline) {
-    const p2Score = document.getElementById('p2-score');
-    const p2Bar   = document.getElementById('p2-bar');
-    const p1Name  = document.getElementById('hud-p1-name');
-    const p2Name  = document.getElementById('hud-p2-name');
-    if (isOnline) {
-      p2Score.classList.add('online');
-      p2Bar.classList.add('online');
-      p1Name.textContent = this.myId===1 ? 'Du 🟢' : 'Spieler 1';
-      p2Name.textContent = this.myId===2 ? 'Du 🔵' : 'Spieler 2';
-    } else {
-      p2Score.classList.remove('online');
-      p2Bar.classList.remove('online');
-      p1Name.textContent = 'Du';
-      p2Name.textContent = 'KI';
-    }
-    document.getElementById('dead-overlay').classList.add('hidden');
-    document.getElementById('pause-overlay').classList.add('hidden');
-    document.getElementById('countdown').classList.add('hidden');
+    if (!state.players) return;
+    buildOnlineHUD(state.players, this.myId, state.aiLevel, state.elapsed);
   }
 
   showOnlineEnd(result) {
-    const isP1 = this.myId === 1;
-    const myScore    = isP1 ? result.p1Score : result.p2Score;
-    const theirScore = isP1 ? result.p2Score : result.p1Score;
+    const myPlayer    = result.players?.find(p => p.id === this.myId);
+    const winner      = result.players?.find(p => p.id === result.winnerId);
+    const isWinner    = result.winnerId === this.myId;
 
-    let trophy, title, sub;
-    if (result.winner === 'draw') {
-      trophy='🤝'; title='Unentschieden!'; sub='Punktegleichstand — ihr seid gleich gut!';
-    } else if ((result.winner==='player1'&&isP1)||(result.winner==='player2'&&!isP1)) {
-      trophy='🏆'; title='Du gewinnst!'; sub='Glückwunsch — dein Gegner hatte keine Chance!';
-    } else {
-      trophy='💀'; title='Verloren!'; sub='Dein Gegner war diesmal besser. Revanche?';
+    const trophy = isWinner ? '🏆' : '💀';
+    const title  = isWinner ? 'Du gewinnst!' : `${winner?.name ?? 'Jemand'} gewinnt!`;
+    const sub    = isWinner ? 'Glückwunsch — du warst am besten!' : 'Besser nächstes Mal. Revanche?';
+
+    document.getElementById('end-trophy').textContent   = trophy;
+    document.getElementById('end-title').textContent    = title;
+    document.getElementById('end-subtitle').textContent = sub;
+
+    // Stats: alle Spieler + KI-Info
+    const secs = Math.floor((result.elapsed||0)/1000), mins = Math.floor(secs/60);
+    const statsEl = document.getElementById('end-stats');
+    let html = '';
+    for (const p of (result.players || [])) {
+      const [col] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
+      html += `<div class="stat-block">
+        <div class="stat-val" style="color:${col}">${p.score}</div>
+        <div class="stat-lbl">${escHtml(p.name)}${p.id===this.myId?' (Du)':''}</div>
+      </div>`;
     }
+    html += `
+      <div class="stat-block"><div class="stat-val">${mins}:${String(secs%60).padStart(2,'0')}</div><div class="stat-lbl">Spielzeit</div></div>
+      <div class="stat-block"><div class="stat-val">${result.maxAiLevel ?? '?'}</div><div class="stat-lbl">Max KI-Stufe</div></div>
+    `;
+    statsEl.innerHTML = html;
 
-    document.getElementById('end-trophy').textContent    = trophy;
-    document.getElementById('end-title').textContent     = title;
-    document.getElementById('end-subtitle').textContent  = sub;
-    document.getElementById('stat-player-score').textContent = myScore;
-    document.getElementById('stat-ai-score').textContent     = theirScore;
-    const secs=Math.floor((result.elapsed||0)/1000), mins=Math.floor(secs/60);
-    document.getElementById('stat-time').textContent     = `${mins}:${String(secs%60).padStart(2,'0')}`;
-    document.getElementById('stat-ai-level').textContent = result.maxAiLevel;
-    document.getElementById('stat-p1-lbl').textContent   = 'Deine Punkte';
-    document.getElementById('stat-p2-lbl').textContent   = 'Gegner Punkte';
     document.getElementById('rematch-status').classList.add('hidden');
-
     document.getElementById('play-again-btn').onclick = () => {
       this.send({ type:'rematch' });
-      document.getElementById('rematch-status').textContent = 'Anfrage gesendet…';
+      document.getElementById('rematch-status').textContent = 'Rematch-Anfrage gesendet…';
       document.getElementById('rematch-status').classList.remove('hidden');
     };
-
     setTimeout(() => showScreen('end'), 600);
   }
 
@@ -698,9 +793,70 @@ class OnlineClient {
   }
 
   disconnect() {
-    this.myId=null; this.roomCode=null;
+    this.myId=null; this.roomCode=null; this.isCreator=false;
+    this.renderer.myId = null;
     if (this.ws) { this.ws.onclose=null; this.ws.close(); this.ws=null; }
   }
+}
+
+// ── HUD HELPERS ──────────────────────────────────────────────
+function buildLocalHUD(playerScore, aiScore, aiLevel, elapsed) {
+  const cards = document.getElementById('player-cards');
+  if (!cards._local) {
+    cards._local = true;
+    cards.innerHTML = `
+      <div class="pcard" id="lhud-p1">
+        <div class="pcard-dot" style="background:#39ff14"></div>
+        <div class="pcard-info">
+          <div class="pcard-name">Du</div>
+          <div class="pcard-score" id="lhud-p1-score" style="color:#39ff14">0</div>
+        </div>
+      </div>
+      <div class="pcard" id="lhud-ai">
+        <div class="pcard-dot" style="background:#ff3a3a"></div>
+        <div class="pcard-info">
+          <div class="pcard-name">KI</div>
+          <div class="pcard-score" id="lhud-ai-score" style="color:#ff3a3a">0</div>
+        </div>
+      </div>
+    `;
+  }
+  document.getElementById('lhud-p1-score').textContent = playerScore;
+  document.getElementById('lhud-ai-score').textContent = aiScore;
+
+  const badge  = document.getElementById('ai-level-badge');
+  const labels = ['','Stufe 1 – Anfänger','Stufe 2 – Lernend','Stufe 3 – Gefährlich','Stufe 4 – Aggressiv','Stufe 5 – TÖDLICH'];
+  badge.textContent = labels[aiLevel] || `Stufe ${aiLevel}`;
+  badge.classList.toggle('danger', aiLevel >= 4);
+
+  const secs = Math.floor((elapsed||0)/1000), mins = Math.floor(secs/60);
+  document.getElementById('timer').textContent = `${mins}:${String(secs%60).padStart(2,'0')}`;
+}
+
+function buildOnlineHUD(players, myId, aiLevel, elapsed) {
+  const cards = document.getElementById('player-cards');
+  cards._local = false;
+  let html = '';
+  for (const p of players) {
+    const [col] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
+    const isMe  = p.id === myId;
+    html += `<div class="pcard${isMe?' is-me':''}${!p.alive?' dead':''}">
+      <div class="pcard-dot" style="background:${col}"></div>
+      <div class="pcard-info">
+        <div class="pcard-name">${escHtml(p.name||`P${p.id}`)}${isMe?' <span class="you-tag">(Du)</span>':''}</div>
+        <div class="pcard-score" style="color:${col}">${p.score}</div>
+      </div>
+    </div>`;
+  }
+  cards.innerHTML = html;
+
+  const badge  = document.getElementById('ai-level-badge');
+  const labels = ['','Stufe 1','Stufe 2','Stufe 3 – Gefährlich','Stufe 4 – Aggressiv','Stufe 5 – TÖDLICH'];
+  badge.textContent = labels[aiLevel] || `Stufe ${aiLevel}`;
+  badge.classList.toggle('danger', aiLevel >= 4);
+
+  const secs = Math.floor((elapsed||0)/1000), mins = Math.floor(secs/60);
+  document.getElementById('timer').textContent = `${mins}:${String(secs%60).padStart(2,'0')}`;
 }
 
 // ── UI HELPERS ───────────────────────────────────────────────
@@ -716,25 +872,34 @@ function showError(msg) {
   showScreen('online');
 }
 
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function getPlayerName() {
+  return (document.getElementById('player-name-input').value.trim() || 'Spieler').slice(0,16);
+}
+
 // ── GLOBALE VARIABLEN ────────────────────────────────────────
-let bgAnim   = null;
-let renderer = null;
-let localGame = null;
+let bgAnim      = null;
+let renderer    = null;
+let localGame   = null;
 let onlineClient = null;
-let selSpeed = 90;
+let selSpeed    = 90;
 
 function startCountdown(speed) {
   localGame.start(speed);
-  document.getElementById('hud-p1-name').textContent = 'Du';
-  document.getElementById('hud-p2-name').textContent = 'KI';
-  document.getElementById('p2-score').classList.remove('online');
-  document.getElementById('p2-bar').classList.remove('online');
+  // HUD zurücksetzen
+  document.getElementById('player-cards')._local = false; // erzwingt rebuild
+  buildLocalHUD(0, 0, 1, 0);
   document.getElementById('dead-overlay').classList.add('hidden');
+  document.getElementById('pause-overlay').classList.add('hidden');
   showScreen('game');
   const el = document.getElementById('countdown');
   el.classList.remove('hidden');
   let count = 3;
   el.textContent = count;
+  el.style.animation = 'none'; void el.offsetWidth; el.style.animation = '';
   const iv = setInterval(() => {
     count--;
     if (count > 0) {
@@ -750,9 +915,9 @@ function startCountdown(speed) {
 
 // ── INIT ─────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-  bgAnim   = new BgAnimation(document.getElementById('bg-canvas'));
-  renderer = new Renderer(document.getElementById('game-canvas'));
-  localGame = new SnakeGame(renderer);
+  bgAnim      = new BgAnimation(document.getElementById('bg-canvas'));
+  renderer    = new Renderer(document.getElementById('game-canvas'));
+  localGame   = new SnakeGame(renderer);
   onlineClient = new OnlineClient(renderer);
   onlineClient.bindKeys();
 
@@ -778,6 +943,10 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('online-btn').addEventListener('click', () => {
     bgAnim.stop();
     document.getElementById('online-error').classList.add('hidden');
+    // Name vorausfüllen
+    if (!document.getElementById('player-name-input').value) {
+      document.getElementById('player-name-input').value = '';
+    }
     showScreen('online');
   });
 
@@ -790,27 +959,56 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Raum erstellen
   document.getElementById('create-room-btn').addEventListener('click', () => {
+    const name = getPlayerName();
+    if (!name || name === 'Spieler') {
+      document.getElementById('player-name-input').focus();
+      return;
+    }
     document.getElementById('online-error').classList.add('hidden');
     onlineClient.disconnect();
     onlineClient = new OnlineClient(renderer);
     onlineClient.bindKeys();
     onlineClient.speed = selSpeed;
-    onlineClient.connect(() => onlineClient.send({ type:'create', speed:selSpeed }));
+    // Lobby zurücksetzen
+    document.getElementById('lobby-players').innerHTML = '';
+    document.getElementById('lobby-start-btn').classList.add('hidden');
+    onlineClient.connect(() => onlineClient.send({ type:'create', speed:selSpeed, name }));
   });
 
   // Raum beitreten
   document.getElementById('join-room-btn').addEventListener('click', () => {
     const code = document.getElementById('code-input').value.trim().toUpperCase();
+    const name = getPlayerName();
     if (code.length < 4) { showError('Bitte einen 4-stelligen Code eingeben.'); return; }
+    if (!name || name === 'Spieler') {
+      document.getElementById('player-name-input').focus();
+      showError('Bitte zuerst deinen Namen eingeben.');
+      return;
+    }
     document.getElementById('online-error').classList.add('hidden');
     onlineClient.disconnect();
     onlineClient = new OnlineClient(renderer);
     onlineClient.bindKeys();
-    onlineClient.connect(() => onlineClient.send({ type:'join', code }));
+    onlineClient.roomCode = code;
+    // Lobby zurücksetzen
+    document.getElementById('lobby-players').innerHTML = '';
+    document.getElementById('lobby-start-btn').classList.add('hidden');
+    onlineClient.connect(() => onlineClient.send({ type:'join', code, name }));
   });
 
   document.getElementById('code-input').addEventListener('keydown', e => {
     if (e.key==='Enter') document.getElementById('join-room-btn').click();
+  });
+  document.getElementById('player-name-input').addEventListener('keydown', e => {
+    if (e.key==='Enter') document.getElementById('create-room-btn').click();
+  });
+
+  // Lobby: Spiel starten (nur für Creator)
+  document.getElementById('lobby-start-btn').addEventListener('click', () => {
+    onlineClient.send({ type:'start' });
+    document.getElementById('lobby-start-btn').classList.add('hidden');
+    document.getElementById('lobby-msg').textContent = 'Starte Spiel…';
+    document.getElementById('countdown').classList.add('hidden');
   });
 
   // Warten abbrechen

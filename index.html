@@ -73,13 +73,19 @@
   <div id="online-screen" class="screen">
     <div class="online-content">
       <div class="online-logo">🌐 Online Multiplayer</div>
-      <p class="online-sub">Spiele gegen einen Freund — und beide gegen die KI</p>
+      <p class="online-sub">Spiele gegen Freunde — und alle gegen die KI (bis zu 4 Spieler)</p>
+
+      <!-- Name-Eingabe -->
+      <div class="name-input-wrap">
+        <label class="name-input-label">Dein Name</label>
+        <input id="player-name-input" class="name-input" placeholder="Name eingeben…" maxlength="16" spellcheck="false" autocomplete="off" />
+      </div>
 
       <div class="online-cards">
         <div class="online-card" id="create-card">
           <div class="card-icon">🏠</div>
           <div class="card-title">Raum erstellen</div>
-          <div class="card-desc">Du bekommst einen Code, den du mit einem Freund teilst.</div>
+          <div class="card-desc">Du bekommst einen Code, den du mit Freunden teilst. Du startest das Spiel.</div>
           <button class="btn-card" id="create-room-btn">Raum erstellen</button>
         </div>
 
@@ -99,14 +105,21 @@
     </div>
   </div>
 
-  <!-- ── WAITING SCREEN ───────────────────────────────────────── -->
+  <!-- ── LOBBY / WAITING SCREEN ──────────────────────────────── -->
   <div id="waiting-screen" class="screen">
     <div class="waiting-content">
-      <div class="waiting-icon">⏳</div>
-      <div class="waiting-title">Warte auf Mitspieler…</div>
-      <div class="waiting-sub">Teile diesen Code:</div>
+      <div class="waiting-sub">Code für deine Freunde:</div>
       <div class="room-code-display" id="display-code">????</div>
+
+      <div id="lobby-players" class="lobby-players"></div>
+
+      <button id="lobby-start-btn" class="btn-start hidden">
+        <span class="btn-text">▶ SPIEL STARTEN</span>
+        <span class="btn-glow"></span>
+      </button>
+      <div id="lobby-msg" class="waiting-sub">Warte auf weitere Spieler…</div>
       <div class="waiting-dots"><span></span><span></span><span></span></div>
+
       <button class="btn-back" id="waiting-cancel-btn">Abbrechen</button>
     </div>
   </div>
@@ -114,21 +127,10 @@
   <!-- ── GAME SCREEN ─────────────────────────────────────────── -->
   <div id="game-screen" class="screen">
     <div id="hud">
-      <div class="hud-block player-hud" id="hud-p1">
-        <div class="hud-name" id="hud-p1-name">Du</div>
-        <div class="hud-score player-score" id="player-score">0</div>
-        <div class="hud-bar"><div class="hud-bar-fill player-bar" id="player-bar"></div></div>
-      </div>
-
+      <div id="player-cards"></div>
       <div class="hud-center">
         <div class="ai-level-badge" id="ai-level-badge">KI Stufe 1</div>
         <div id="timer">00:00</div>
-      </div>
-
-      <div class="hud-block hud-right" id="hud-p2">
-        <div class="hud-name" id="hud-p2-name">KI</div>
-        <div class="hud-score" id="p2-score">0</div>
-        <div class="hud-bar"><div class="hud-bar-fill p2-bar" id="p2-bar"></div></div>
       </div>
     </div>
 
@@ -158,23 +160,8 @@
       <div id="end-title">Gewonnen!</div>
       <div id="end-subtitle"></div>
 
-      <div class="end-stats">
-        <div class="stat-block">
-          <div class="stat-val" id="stat-player-score">0</div>
-          <div class="stat-lbl" id="stat-p1-lbl">Deine Punkte</div>
-        </div>
-        <div class="stat-block" id="stat-p2-block">
-          <div class="stat-val" id="stat-ai-score">0</div>
-          <div class="stat-lbl" id="stat-p2-lbl">KI Punkte</div>
-        </div>
-        <div class="stat-block">
-          <div class="stat-val" id="stat-time">0:00</div>
-          <div class="stat-lbl">Spielzeit</div>
-        </div>
-        <div class="stat-block">
-          <div class="stat-val" id="stat-ai-level">1</div>
-          <div class="stat-lbl">Max KI-Stufe</div>
-        </div>
+      <div class="end-stats" id="end-stats">
+        <!-- dynamic -->
       </div>
 
       <div id="rematch-status" class="hidden rematch-status"></div>
