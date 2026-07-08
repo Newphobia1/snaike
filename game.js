@@ -7,7 +7,7 @@
 const WS_URL = (() => {
   const h = window.location.hostname;
   if (h === 'localhost' || h === '127.0.0.1') return 'ws://localhost:3001';
-  return 'wss://DEINE-SERVER-URL.railway.app'; // ← hier nach Deploy eintragen
+  return 'wss://snaike-production.up.railway.app';
 })();
 
 const COLS = 28, ROWS = 24, CELL = 22;
