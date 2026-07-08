@@ -901,7 +901,7 @@ let bgAnim      = null;
 let renderer    = null;
 let localGame   = null;
 let onlineClient = null;
-let selSpeed    = 90;
+let selSpeed    = 55;
 
 function startCountdown(speed) {
   localGame.start(speed);
@@ -1025,6 +1025,21 @@ window.addEventListener('DOMContentLoaded', () => {
     document.getElementById('lobby-start-btn').classList.add('hidden');
     document.getElementById('lobby-msg').textContent = 'Starte Spiel…';
     document.getElementById('countdown').classList.add('hidden');
+  });
+
+  // Code kopieren
+  document.getElementById('display-code').addEventListener('click', () => {
+    const code = document.getElementById('display-code').textContent;
+    if (!code || code === '????') return;
+    navigator.clipboard.writeText(code).then(() => {
+      const hint = document.getElementById('copy-hint');
+      hint.textContent = '✓ Kopiert!';
+      hint.classList.add('copied');
+      setTimeout(() => {
+        hint.textContent = '📋 Klicken zum Kopieren';
+        hint.classList.remove('copied');
+      }, 2000);
+    });
   });
 
   // Warten abbrechen
