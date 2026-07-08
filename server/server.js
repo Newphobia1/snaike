@@ -162,7 +162,7 @@ class Room {
       name: sanitizeName(name),
       snake: start.snake.map(s=>({...s})),
       dir:   { ...start.dir },
-      nextDir: null,
+      dirQueue: [],
       score: 0, alive: true, wantsRematch: false,
       isCreator: id === 1,
     };
@@ -216,7 +216,7 @@ class Room {
   }
 
   tick() {
-    for (const p of this.players) { if (!p.alive) continue; if (p.nextDir) { p.dir=p.nextDir; p.nextDir=null; } }
+    for (const p of this.players) { if (!p.alive) continue; if (p.dirQueue.length > 0) { p.dir = p.dirQueue.shift(); } }
     this.aiDir = this.ai.getNextDir();
 
     const newHeads = {};
@@ -308,7 +308,7 @@ class Room {
       const start = STARTS[p.id-1];
       p.snake  = start.snake.map(s=>({...s}));
       p.dir    = {...start.dir};
-      p.nextDir=null; p.score=0; p.alive=true; p.wantsRematch=false;
+      p.dirQueue=[]; p.score=0; p.alive=true; p.wantsRematch=false;
     }
     this.aiSnake = [{x:14,y:6},{x:14,y:7},{x:14,y:8}];
     this.aiDir   = {x:0,y:-1};
@@ -397,8 +397,10 @@ wss.on('connection', ws => {
       const { player } = entry;
       const d = msg.dir;
       if (!d || typeof d.x!=='number') return;
-      if (d.x===-player.dir.x && d.y===-player.dir.y) return;
-      player.nextDir = d;
+      // prüft gegen die zuletzt gequeute Richtung (nicht die aktuelle)
+      const lastDir = player.dirQueue[player.dirQueue.length - 1] ?? player.dir;
+      if (d.x === -lastDir.x && d.y === -lastDir.y) return;
+      if (player.dirQueue.length < 2) player.dirQueue.push(d);
     }
 
     else if (msg.type==='rematch') {

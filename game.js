@@ -417,7 +417,7 @@ class SnakeGame {
     this.aiSnake     = [];
     this.playerDir   = { x:1, y:0 };
     this.aiDir       = { x:-1, y:0 };
-    this.nextDir     = null;
+    this.dirQueue    = [];
     this.food        = { x:14, y:12 };
     this.obstacles   = [];
     this.playerScore = 0;
@@ -447,7 +447,10 @@ class SnakeGame {
       if (action) {
         e.preventDefault();
         const nd = action==='up'?{x:0,y:-1}:action==='dn'?{x:0,y:1}:action==='lt'?{x:-1,y:0}:{x:1,y:0};
-        if (nd.x!==-this.playerDir.x || nd.y!==-this.playerDir.y) this.nextDir = nd;
+        const last = this.dirQueue[this.dirQueue.length-1] ?? this.playerDir;
+        if (nd.x !== -last.x || nd.y !== -last.y) {
+          if (this.dirQueue.length < 2) this.dirQueue.push(nd);
+        }
       }
       if (e.key==='p'||e.key==='P') this.togglePause();
       if (e.key==='Escape') this.quit();
@@ -458,7 +461,7 @@ class SnakeGame {
     this.speed = speed;
     this.playerSnake = [{x:6,y:12},{x:5,y:12},{x:4,y:12}];
     this.aiSnake     = [{x:21,y:12},{x:22,y:12},{x:23,y:12}];
-    this.playerDir   = {x:1,y:0}; this.aiDir={x:-1,y:0}; this.nextDir=null;
+    this.playerDir   = {x:1,y:0}; this.aiDir={x:-1,y:0}; this.dirQueue=[];
     this.obstacles   = [];
     this.playerScore = 0; this.aiScore=0; this.aiLevel=1; this.maxAiLevel=1;
     this.elapsed=0; this.paused=false;
@@ -501,7 +504,7 @@ class SnakeGame {
   }
 
   tick() {
-    if (this.nextDir) { this.playerDir=this.nextDir; this.nextDir=null; }
+    if (this.dirQueue.length > 0) { this.playerDir = this.dirQueue.shift(); }
     this.aiDir = this.ai.getNextDir();
 
     const pH = { x:wrap(this.playerSnake[0].x+this.playerDir.x,COLS), y:wrap(this.playerSnake[0].y+this.playerDir.y,ROWS) };
@@ -835,20 +838,33 @@ function buildLocalHUD(playerScore, aiScore, aiLevel, elapsed) {
 
 function buildOnlineHUD(players, myId, aiLevel, elapsed) {
   const cards = document.getElementById('player-cards');
-  cards._local = false;
-  let html = '';
-  for (const p of players) {
-    const [col] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
-    const isMe  = p.id === myId;
-    html += `<div class="pcard${isMe?' is-me':''}${!p.alive?' dead':''}">
-      <div class="pcard-dot" style="background:${col}"></div>
-      <div class="pcard-info">
-        <div class="pcard-name">${escHtml(p.name||`P${p.id}`)}${isMe?' <span class="you-tag">(Du)</span>':''}</div>
-        <div class="pcard-score" style="color:${col}">${p.score}</div>
-      </div>
-    </div>`;
+
+  // Struktur nur einmal aufbauen oder wenn Spielerzahl sich ändert
+  if (!cards._onlineCount || cards._onlineCount !== players.length) {
+    cards._onlineCount = players.length;
+    cards._local = false;
+    let html = '';
+    for (const p of players) {
+      const [col] = PLAYER_COLORS[(p.id-1) % PLAYER_COLORS.length];
+      const isMe  = p.id === myId;
+      html += `<div class="pcard${isMe?' is-me':''}" data-pid="${p.id}">
+        <div class="pcard-dot" style="background:${col}"></div>
+        <div class="pcard-info">
+          <div class="pcard-name">${escHtml(p.name||`P${p.id}`)}${isMe?' <span class="you-tag">(Du)</span>':''}</div>
+          <div class="pcard-score" data-score="${p.id}" style="color:${col}">${p.score}</div>
+        </div>
+      </div>`;
+    }
+    cards.innerHTML = html;
+  } else {
+    // Nur Scores und alive-Status updaten — kein DOM rebuild
+    for (const p of players) {
+      const scoreEl = cards.querySelector(`[data-score="${p.id}"]`);
+      if (scoreEl) scoreEl.textContent = p.score;
+      const cardEl  = cards.querySelector(`[data-pid="${p.id}"]`);
+      if (cardEl) cardEl.classList.toggle('dead', !p.alive);
+    }
   }
-  cards.innerHTML = html;
 
   const badge  = document.getElementById('ai-level-badge');
   const labels = ['','Stufe 1','Stufe 2','Stufe 3 – Gefährlich','Stufe 4 – Aggressiv','Stufe 5 – TÖDLICH'];
